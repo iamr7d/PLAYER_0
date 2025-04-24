@@ -4,12 +4,12 @@ from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from rounded_video_widget import RoundedVideoWidget
 from controls import ControlsBar
 from styles import MODERN_STYLESHEET
-from movie_info_card import MovieInfoCard, BlurredOverlayWidget
+
 import os
-import threading
-import requests
-import json
-from dotenv import load_dotenv
+
+
+
+
 
 class ModernVideoPlayer(QMainWindow):
     def __init__(self):
@@ -22,9 +22,7 @@ class ModernVideoPlayer(QMainWindow):
         self.init_ui()
 
     def init_ui(self):
-        load_dotenv()
-        self.tavily_api_key = os.getenv("TAVILY_API_KEY", "")
-        self.gemini_api_key = os.getenv("GEMINI_API_KEY", "")
+
         self.widget = QWidget(self)
         self.setCentralWidget(self.widget)
 

@@ -4,10 +4,17 @@ from PyQt6.QtGui import QIcon, QPixmap, QColor
 from controller_icons import PLAY_ICON, PAUSE_ICON, OPEN_ICON, VOLUME_ICON, FULLSCREEN_ICON, EXIT_FULLSCREEN_ICON
 from PyQt6.QtSvgWidgets import QSvgWidget
 from gradient_slider import GradientSlider
-from blink_counter_widget import BlinkCounterLabel
+from blink_counter_thread import BlinkCounterThread
 import base64
 
+from PyQt6.QtCore import pyqtSignal
+
 class ControlsBar(QHBoxLayout):
+    fullscreen_toggled = pyqtSignal()
+
+    def emit_fullscreen_toggle(self):
+        self.fullscreen_toggled.emit()
+
     def __init__(self, mediaPlayer, audio_output, videoWidget, parent=None):
         super().__init__()
         self.setContentsMargins(24, 16, 24, 32)
@@ -27,6 +34,8 @@ class ControlsBar(QHBoxLayout):
         self.widget = QWidget()
         self.widget.setObjectName("controlsBar")
         self.widget.setGraphicsEffect(self.opacity_effect)
+        self.widget.setStyleSheet("background: transparent; border: none; margin: 0; padding: 0;")
+        self.blink_thread = None
         self.init_controls()
 
     def init_controls(self):
@@ -96,6 +105,38 @@ class ControlsBar(QHBoxLayout):
         self.volumeSlider.set_glow_color(QColor(79, 140, 255, 60))  # Soft blue glow
         self.volumeSlider.set_buffering(False)  # No buffering animation for volume
 
+        # Blink count label
+        from PyQt6.QtCore import QPropertyAnimation
+        self.blinkLabel = QLabel("Blinks: 0")
+        self.blinkLabel.setObjectName("blinkLabel")
+        self.blinkLabel.setStyleSheet('''
+            QLabel {
+                font-family: monospace, Gotham, GothamRegular, Arial, sans-serif;
+                font-size: 16px;
+                color: #e0e6f0;
+                letter-spacing: 0.5px;
+                margin-left: 8px;
+            }
+        ''')
+        # Neon blink circle
+        self.blinkCircle = QLabel()
+        self.blinkCircle.setFixedSize(18, 18)
+        self.blinkCircle.setStyleSheet('''
+            QLabel {
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.7, fx:0.5, fy:0.5, stop:0 #4f8cff, stop:1 #181e26);
+                border-radius: 9px;
+                border: 2px solid #4f8cff;
+                margin-left: 12px;
+            }
+        ''')
+        self.blinkCircle.setObjectName("blinkCircle")
+        self.blinkCircle.setGraphicsEffect(None)
+        self.blink_anim = QPropertyAnimation(self.blinkCircle, b"windowOpacity")
+        self.blink_anim.setDuration(350)
+        self.blink_anim.setStartValue(1.0)
+        self.blink_anim.setKeyValueAt(0.5, 0.15)
+        self.blink_anim.setEndValue(1.0)
+
         self.volumeIcon = QPushButton()
         self.volumeIcon.setIcon(QIcon(r"icons/wave-sound.png"))
         self.volumeIcon.setIconSize(QSize(32, 32))
@@ -104,11 +145,14 @@ class ControlsBar(QHBoxLayout):
         self.volumeIcon.setEnabled(False)
         self.volumeIcon.setStyleSheet("background: transparent; border: none;")
 
+        from PyQt6.QtCore import pyqtSignal
         self.fullscreenBtn = QPushButton()
-        self.fullscreenBtn.setIcon(self.svg_icon(FULLSCREEN_ICON))
+        self.fullscreenBtn.setIcon(QIcon(r"icons/expand.png"))
+        self.fullscreenBtn.setIconSize(QSize(32, 32))
         self.fullscreenBtn.setFixedSize(40, 40)
         self.fullscreenBtn.setObjectName("fullscreenBtn")
-        self.fullscreenBtn.clicked.connect(self.toggle_fullscreen)
+        self.fullscreenBtn.clicked.connect(self.emit_fullscreen_toggle)
+        self.fullscreenBtn.setStyleSheet("background-color: rgba(0,0,0,0); border: none; margin: 0; padding: 0;")
 
         # Modern minimal layout: buttons, progress, time, volume, fullscreen
         inner_layout = QHBoxLayout()
@@ -130,10 +174,10 @@ class ControlsBar(QHBoxLayout):
         inner_layout.addWidget(self.timeLabel, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.positionSlider, 4, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.volumeIcon, 0, Qt.AlignmentFlag.AlignVCenter)
-        # Add blink count label only near the volume bar
-        self.blinkLabel = BlinkCounterLabel()
+        inner_layout.addWidget(self.blinkCircle, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.blinkLabel, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.volumeSlider, 0, Qt.AlignmentFlag.AlignVCenter)
+        inner_layout.addWidget(self.fullscreenBtn, 0, Qt.AlignmentFlag.AlignVCenter)
         # Connect playback state to blink counting
         self.mediaPlayer.playbackStateChanged.connect(self._on_playback_state_changed)
 
@@ -235,10 +279,36 @@ class ControlsBar(QHBoxLayout):
         self.update_time_label()
 
     def _on_playback_state_changed(self, state):
+        import os
+        if not hasattr(self, '_last_blink_count'):
+            self._last_blink_count = 0
+        # Get movie file name (without extension)
+        movie_path = None
+        if hasattr(self.mediaPlayer, 'source'):
+            src = self.mediaPlayer.source()
+            if hasattr(src, 'toLocalFile'):
+                movie_path = src.toLocalFile()
+        movie_base = os.path.splitext(os.path.basename(movie_path))[0] if movie_path else "blink_log"
         if state == self.mediaPlayer.PlaybackState.PlayingState:
-            self.blinkLabel.start_blinking()
+            if not self.blink_thread or not self.blink_thread.isRunning():
+                self.blink_thread = BlinkCounterThread(movie_base)
+                self.blink_thread.blink_count = self._last_blink_count
+                self.blink_thread.blink_count_changed.connect(self._update_and_store_blink_label)
+                self.blink_thread.start()
         else:
-            self.blinkLabel.stop_blinking()
+            if self.blink_thread and self.blink_thread.isRunning():
+                self.blink_thread.stop()
+
+    def _update_and_store_blink_label(self, count):
+        self._last_blink_count = count
+        self.update_blink_label(count)
+
+
+    def update_blink_label(self, count):
+        self.blinkLabel.setText(f"Blinks: {count}")
+        # Neon blink effect
+        self.blink_anim.stop()
+        self.blink_anim.start()
 
     def update_time_label(self):
         pos_ms = self.mediaPlayer.position()
@@ -301,21 +371,6 @@ class ControlsBar(QHBoxLayout):
             self._aiSidebar.hide()
         if self._aiSidebar.isVisible():
             self._aiSidebar.hide()
-        else:
-            self._aiSidebar.setGeometry(mw.width()-320, 0, 320, mw.height())
-            self._aiSidebar.show()
-            self._aiSidebar.raise_()
-
-    def toggle_fullscreen(self):
-        if self.videoWidget.isFullScreen():
-            self.videoWidget.setFullScreen(False)
-            self.set_controls_visible(True, instant=True)
-            self.fullscreen = False
-            self.widget.setProperty("fullscreen", False)
-            self.widget.style().unpolish(self.widget)
-            self.widget.style().polish(self.widget)
-            self.fullscreenBtn.setIcon(self.svg_icon(FULLSCREEN_ICON))
-        else:
             self.videoWidget.setFullScreen(True)
             self.set_controls_visible(True, instant=True)
             self.fullscreen = True
