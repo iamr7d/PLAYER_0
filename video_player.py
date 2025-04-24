@@ -127,10 +127,10 @@ class ModernVideoPlayer(QMainWindow):
         self.timeLabel.setText(f"Error: {errorString}")
 
     def toggle_fullscreen(self):
-        if self.videoWidget.isFullScreen():
-            self.videoWidget.setFullScreen(False)
+        if self.isFullScreen():
+            self.showNormal()
         else:
-            self.videoWidget.setFullScreen(True)
+            self.showFullScreen()
 
     def dragEnterEvent(self, event):
         if event.mimeData().hasUrls():

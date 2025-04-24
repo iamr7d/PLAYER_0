@@ -1,7 +1,9 @@
 from PyQt6.QtWidgets import QMainWindow, QWidget, QVBoxLayout, QHBoxLayout, QFileDialog, QStyle, QLabel, QSlider, QPushButton
+from window_controls import ModernWindowControls
 from PyQt6.QtCore import Qt, QUrl
 from PyQt6.QtMultimedia import QMediaPlayer, QAudioOutput
 from rounded_video_widget import RoundedVideoWidget
+from overlay_title import OverlayTitleLabel
 from controls import ControlsBar
 from styles import MODERN_STYLESHEET
 
@@ -12,19 +14,42 @@ import os
 
 
 class ModernVideoPlayer(QMainWindow):
+    def mousePressEvent(self, event):
+        if event.button() == Qt.MouseButton.LeftButton:
+            self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
+            self._dragging = True
+            event.accept()
+        super().mousePressEvent(event)
+
+    def mouseMoveEvent(self, event):
+        if hasattr(self, '_dragging') and self._dragging and event.buttons() & Qt.MouseButton.LeftButton:
+            self.move(event.globalPosition().toPoint() - self._drag_pos)
+            event.accept()
+        super().mouseMoveEvent(event)
+
+    def mouseReleaseEvent(self, event):
+        if hasattr(self, '_dragging'):
+            self._dragging = False
+        super().mouseReleaseEvent(event)
+
     def __init__(self):
         super().__init__()
         self.setWindowTitle("Cascade Modern Video Player")
         self.setGeometry(200, 100, 980, 600)
         self.setStyleSheet(MODERN_STYLESHEET)
         self.setMouseTracking(True)
+        self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
+        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
         self.info_overlay = None
         self.init_ui()
 
     def init_ui(self):
-
         self.widget = QWidget(self)
         self.setCentralWidget(self.widget)
+
+        # Add modern window controls at the top
+        self.windowControls = ModernWindowControls(self)
+        self.windowControls.set_title("")
 
         self.mediaPlayer = QMediaPlayer(self)
         self.audio_output = QAudioOutput()
@@ -32,25 +57,41 @@ class ModernVideoPlayer(QMainWindow):
         self.videoWidget = RoundedVideoWidget(radius=28, parent=self)
         self.mediaPlayer.setVideoOutput(self.videoWidget)
 
+        self.overlayTitle = OverlayTitleLabel(self.videoWidget)
+        self.overlayTitle.raise_()
+
         self.controls = ControlsBar(self.mediaPlayer, self.audio_output, self.videoWidget, self)
+        self.controls.fullscreen_toggled.connect(self.toggle_fullscreen)
 
         mainLayout = QVBoxLayout()
-        mainLayout.setContentsMargins(0, 0, 0, 0)
+        self.default_margins = (4, 4, 4, 4)
+        mainLayout.setContentsMargins(*self.default_margins)
+        self.mainLayout = mainLayout  # Save for later margin adjustment
         mainLayout.setSpacing(0)
+        mainLayout.addWidget(self.windowControls, 0, Qt.AlignmentFlag.AlignTop)
         mainLayout.addWidget(self.videoWidget, stretch=1)
         # Add progress bar above controls
         self.progressBar = self.controls.positionSlider
-        self.progressBar.setMinimumHeight(24)
-        self.progressBar.setMaximumHeight(36)
-        self.progressBar.setContentsMargins(32, 18, 32, 10)
+        self.progressBar.setMinimumHeight(18)
+        self.progressBar.setMaximumHeight(22)
+        self.progressBar.setContentsMargins(0, 0, 0, 0)
         mainLayout.addWidget(self.progressBar)
         mainLayout.addLayout(self.controls)
         self.widget.setLayout(mainLayout)
+
+        # Fullscreen auto-hide timer
+        from PyQt6.QtCore import QTimer
+        self.autoHideTimer = QTimer(self)
+        self.autoHideTimer.setInterval(3000)
+        self.autoHideTimer.timeout.connect(self.hide_controls)
+        self.controls.widget.installEventFilter(self)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
 
         # Mouse tracking for video widget (fullscreen auto-hide)
         self.videoWidget.setMouseTracking(True)
         self.widget.setMouseTracking(True)
         self.controls.widget.setMouseTracking(True)
+        self.setMouseTracking(True)
 
         self.audio_output.setVolume(0.5)
 
@@ -64,6 +105,49 @@ class ModernVideoPlayer(QMainWindow):
 
         # Drag & Drop
         self.setAcceptDrops(True)
+
+    def toggle_fullscreen(self):
+        from PyQt6.QtWidgets import QSizePolicy
+        if self.isFullScreen():
+            self.showNormal()
+            self.controls.widget.show()
+            self.windowControls.setVisible(True)
+            self.autoHideTimer.stop()
+            # Restore margins in windowed mode
+            self.mainLayout.setContentsMargins(*self.default_margins)
+            self.videoWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        else:
+            self.showFullScreen()
+            self.controls.widget.show()
+            self.windowControls.setVisible(False)
+            self.autoHideTimer.start()
+            # Remove margins in fullscreen
+            self.mainLayout.setContentsMargins(0, 0, 0, 0)
+            self.videoWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+        # Always force windowControls invisible in fullscreen
+        self.windowControls.setVisible(not self.isFullScreen())
+
+
+    def show_controls(self):
+        self.controls.widget.show()
+        self.progressBar.show()
+        if self.isFullScreen():
+            self.windowControls.set_buttons_visible(True)
+            self.windowControls.set_branding_visible(True)  # Show branding in fullscreen on mouse move
+            self.autoHideTimer.start()
+        else:
+            self.windowControls.set_branding_visible(True)  # Show branding in windowed mode
+
+    def hide_controls(self):
+        self.controls.widget.hide()
+        self.progressBar.hide()
+        if self.isFullScreen():
+            self.windowControls.set_buttons_visible(False)
+            self.windowControls.set_branding_visible(False)  # Hide branding in fullscreen
+            # self.setCursor(Qt.CursorShape.BlankCursor)  # Disabled: Always show mouse cursor in fullscreen
+        else:
+            self.windowControls.set_branding_visible(True)  # Show branding in windowed mode
+        self.autoHideTimer.start()
 
     def show_movie_info_overlay(self):
         # If overlay exists, remove it
@@ -142,11 +226,68 @@ class ModernVideoPlayer(QMainWindow):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 fileName = url.toLocalFile()
+                self.windowControls.set_title(os.path.basename(fileName))
                 self.mediaPlayer.setSource(QUrl.fromLocalFile(fileName))
                 self.mediaPlayer.play()
+                # Show overlay title on drop
+                if hasattr(self, 'overlayTitle'):
+                    self.overlayTitle.show_title(os.path.basename(fileName))
                 break
 
+    def open_file(self):
+        fileName, _ = QFileDialog.getOpenFileName(self, "Open Video", "", "Video Files (*.mp4 *.avi *.mkv *.mov)")
+        if fileName:
+            self.windowControls.set_title(os.path.basename(fileName))
+            self.mediaPlayer.setSource(QUrl.fromLocalFile(fileName))
+            self.mediaPlayer.play()
+            # Show overlay title on open
+            if hasattr(self, 'overlayTitle'):
+                self.overlayTitle.show_title(os.path.basename(fileName))
+
     def mouseMoveEvent(self, event):
-        # Forward mouse movement to controls for auto-hide/show
-        self.controls.on_mouse_move()
+        # Show controls and restart auto-hide timer in fullscreen
+        if self.isFullScreen():
+            self.show_controls()
+            self.windowControls.set_buttons_visible(True)
+            self.setCursor(Qt.CursorShape.ArrowCursor)
+        # Show overlay title on mouse move
+        if hasattr(self, 'overlayTitle') and hasattr(self, 'mediaPlayer'):
+            src = self.mediaPlayer.source() if hasattr(self.mediaPlayer, 'source') else None
+            if src and hasattr(src, 'toLocalFile'):
+                file_name = os.path.basename(src.toLocalFile())
+                self.overlayTitle.show_title(file_name)
         super().mouseMoveEvent(event)
+
+    def mousePressEvent(self, event):
+        # Toggle play/pause if video area is clicked
+        if self.childAt(event.position().toPoint()) == self.videoWidget:
+            if self.mediaPlayer.playbackState() == self.mediaPlayer.PlaybackState.PlayingState:
+                self.mediaPlayer.pause()
+            else:
+                self.mediaPlayer.play()
+        super().mousePressEvent(event)
+
+    def keyPressEvent(self, event):
+        key = event.key()
+        if key == Qt.Key.Key_Return:
+            self.toggle_fullscreen()
+        elif key == Qt.Key.Key_Space:
+            # Space bar toggles play/pause
+            if self.mediaPlayer.playbackState() == self.mediaPlayer.PlaybackState.PlayingState:
+                self.mediaPlayer.pause()
+            else:
+                self.mediaPlayer.play()
+            # Show overlay title on play/pause
+            if hasattr(self, 'overlayTitle') and hasattr(self, 'mediaPlayer'):
+                src = self.mediaPlayer.source() if hasattr(self.mediaPlayer, 'source') else None
+                if src and hasattr(src, 'toLocalFile'):
+                    file_name = os.path.basename(src.toLocalFile())
+                    self.overlayTitle.show_title(file_name)
+        elif key == Qt.Key.Key_Right:
+            # Right arrow seeks forward 5 seconds
+            self.mediaPlayer.setPosition(self.mediaPlayer.position() + 5000)
+        elif key == Qt.Key.Key_Left:
+            # Left arrow seeks backward 5 seconds
+            self.mediaPlayer.setPosition(max(0, self.mediaPlayer.position() - 5000))
+        else:
+            super().keyPressEvent(event)

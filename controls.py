@@ -1,11 +1,12 @@
 from PyQt6.QtWidgets import QHBoxLayout, QPushButton, QSlider, QLabel, QFileDialog, QStyle, QWidget, QGraphicsOpacityEffect, QHBoxLayout, QVBoxLayout
 from PyQt6.QtCore import Qt, QUrl, QTimer, QEasingCurve, QPropertyAnimation, QSize
-from PyQt6.QtGui import QIcon, QPixmap, QColor
+from PyQt6.QtGui import QIcon, QPixmap, QColor, QFontDatabase, QFont
 from controller_icons import PLAY_ICON, PAUSE_ICON, OPEN_ICON, VOLUME_ICON, FULLSCREEN_ICON, EXIT_FULLSCREEN_ICON
 from PyQt6.QtSvgWidgets import QSvgWidget
 from gradient_slider import GradientSlider
 from blink_counter_thread import BlinkCounterThread
 import base64
+import os
 
 from PyQt6.QtCore import pyqtSignal
 
@@ -67,21 +68,8 @@ class ControlsBar(QHBoxLayout):
         if main_window is None:
             print("[WARNING] QApplication.activeWindow() is None, using fallback parent for previewLabel.")
             main_window = self.parent if self.parent else self.widget
-        self.previewLabel = QLabel(main_window)
-        self.previewLabel.setFixedSize(160, 90)
-        self.previewLabel.setStyleSheet('''
-            QLabel {
-                background: rgba(34,34,34,0.85);
-                border: 2px solid #444;
-                border-radius: 10px;
-                color: #fff;
-                font-size: 16px;
-                qproperty-alignment: AlignCenter;
-            }
-        ''')
-        self.previewLabel.hide()
-        self.positionSlider.hoverPositionChanged.connect(self.show_preview_at)
-        self.positionSlider.setMouseTracking(True)
+        # Removed previewLabel and percentage popup logic
+        # self.positionSlider.setMouseTracking(True)
 
         self.timeLabel = QLabel('<span style="font-family: monospace, Gotham, GothamRegular, Arial, sans-serif; font-size:16px; color:#e0e6f0; letter-spacing: 0.5px;">00:00:00.00 <span style="color:#4f8cff; font-weight: bold; margin-left:16px;">00.00 %</span></span>')
         self.timeLabel.setObjectName("timeLabel")
@@ -97,6 +85,7 @@ class ControlsBar(QHBoxLayout):
         self.volumeSlider.setMaximumWidth(320)
         self.volumeSlider.setStyleSheet("")  # Use QSS from styles.py
         self.volumeSlider.valueChanged.connect(self.audio_output.setVolume)
+        self.volumeSlider.valueChanged.connect(self.update_volume_icon_opacity)
         # Premium gradient: blue to purple
         self.volumeSlider.set_gradient_colors([
             (0.0, '#4f8cff'),
@@ -106,36 +95,31 @@ class ControlsBar(QHBoxLayout):
         self.volumeSlider.set_buffering(False)  # No buffering animation for volume
 
         # Blink count label
-        from PyQt6.QtCore import QPropertyAnimation
-        self.blinkLabel = QLabel("Blinks: 0")
+        self.blinkLabel = QLabel()
+        self.blinkLabel.setText("BLINKS: 0")
         self.blinkLabel.setObjectName("blinkLabel")
+        fonts_dir = os.path.join(os.path.dirname(__file__), 'fonts')
+        gotham_path = os.path.join(fonts_dir, 'GothamBook.ttf')
+        font_loaded = False
+        if os.path.exists(gotham_path):
+            font_id = QFontDatabase.addApplicationFont(gotham_path)
+            if font_id != -1:
+                family = QFontDatabase.applicationFontFamilies(font_id)[0]
+                self.blinkLabel.setFont(QFont(family, 13, QFont.Weight.Normal))
+                font_loaded = True
+        if not font_loaded:
+            self.blinkLabel.setFont(QFont("Arial", 13, QFont.Weight.Normal))
         self.blinkLabel.setStyleSheet('''
             QLabel {
-                font-family: monospace, Gotham, GothamRegular, Arial, sans-serif;
-                font-size: 16px;
+                font-size: 13px;
                 color: #e0e6f0;
                 letter-spacing: 0.5px;
                 margin-left: 8px;
+                font-family: Gotham, GothamRegular, Arial, sans-serif;
+                font-weight: 400;
             }
         ''')
         # Neon blink circle
-        self.blinkCircle = QLabel()
-        self.blinkCircle.setFixedSize(18, 18)
-        self.blinkCircle.setStyleSheet('''
-            QLabel {
-                background: qradialgradient(cx:0.5, cy:0.5, radius:0.7, fx:0.5, fy:0.5, stop:0 #4f8cff, stop:1 #181e26);
-                border-radius: 9px;
-                border: 2px solid #4f8cff;
-                margin-left: 12px;
-            }
-        ''')
-        self.blinkCircle.setObjectName("blinkCircle")
-        self.blinkCircle.setGraphicsEffect(None)
-        self.blink_anim = QPropertyAnimation(self.blinkCircle, b"windowOpacity")
-        self.blink_anim.setDuration(350)
-        self.blink_anim.setStartValue(1.0)
-        self.blink_anim.setKeyValueAt(0.5, 0.15)
-        self.blink_anim.setEndValue(1.0)
 
         self.volumeIcon = QPushButton()
         self.volumeIcon.setIcon(QIcon(r"icons/wave-sound.png"))
@@ -144,6 +128,10 @@ class ControlsBar(QHBoxLayout):
         self.volumeIcon.setObjectName("volumeIcon")
         self.volumeIcon.setEnabled(False)
         self.volumeIcon.setStyleSheet("background: transparent; border: none;")
+        from PyQt6.QtWidgets import QGraphicsOpacityEffect
+        self.volume_icon_opacity = QGraphicsOpacityEffect()
+        self.volumeIcon.setGraphicsEffect(self.volume_icon_opacity)
+        self.update_volume_icon_opacity(self.volumeSlider.value())
 
         from PyQt6.QtCore import pyqtSignal
         self.fullscreenBtn = QPushButton()
@@ -161,21 +149,30 @@ class ControlsBar(QHBoxLayout):
         inner_layout.setAlignment(Qt.AlignmentFlag.AlignVCenter)
         # Only add: [Open] [Play] [TimeLabel] [ProgressBar] [Volume] [Fullscreen]
 
-        self.volumeIcon = QPushButton()
-        self.volumeIcon.setIcon(QIcon(r"icons/wave-sound.png"))
-        self.volumeIcon.setIconSize(QSize(32, 32))
-        self.volumeIcon.setFixedSize(40, 40)
-        self.volumeIcon.setObjectName("volumeIcon")
-        self.volumeIcon.setEnabled(False)
-        self.volumeIcon.setStyleSheet("background: transparent; border: none;")
-
         inner_layout.addWidget(self.openBtn, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.playBtn, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.timeLabel, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.positionSlider, 4, Qt.AlignmentFlag.AlignVCenter)
-        inner_layout.addWidget(self.volumeIcon, 0, Qt.AlignmentFlag.AlignVCenter)
+        # Add blink circle just before blink label
+        self.blinkCircle = QLabel()
+        self.blinkCircle.setFixedSize(22, 22)
+        self.blinkCircle.setStyleSheet('''
+            QLabel {
+                background: rgba(20, 20, 30, 0.62);
+                border-radius: 11px;
+                border: 2.5px solid #4f8cff;
+            }
+        ''')
+        from PyQt6.QtWidgets import QGraphicsDropShadowEffect
+        shadow = QGraphicsDropShadowEffect()
+        shadow.setBlurRadius(18)
+        shadow.setColor(QColor(79, 140, 255, 120))
+        shadow.setOffset(0, 0)
+        self.blinkCircle.setGraphicsEffect(shadow)
+        self.blinkCircle.setObjectName("blinkCircle")
         inner_layout.addWidget(self.blinkCircle, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.blinkLabel, 0, Qt.AlignmentFlag.AlignVCenter)
+        inner_layout.addWidget(self.volumeIcon, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.volumeSlider, 0, Qt.AlignmentFlag.AlignVCenter)
         inner_layout.addWidget(self.fullscreenBtn, 0, Qt.AlignmentFlag.AlignVCenter)
         # Connect playback state to blink counting
@@ -194,55 +191,12 @@ class ControlsBar(QHBoxLayout):
         self.mediaPlayer.errorOccurred.connect(self.handle_error)
         self.audio_output.setVolume(0.5)
 
-    def show_preview_at(self, percent):
-        # Show preview popup above the progress bar at the hovered percent
-        if not hasattr(self, '_preview_thumb_cache'):
-            self._preview_thumb_cache = {}
-            self._last_preview_sec = None
-        if self.mediaPlayer.duration() > 0:
-            duration = self.mediaPlayer.duration() // 1000
-            preview_sec = int(duration * percent)
-            preview_time = f"{preview_sec // 60:02}:{preview_sec % 60:02}"
-        else:
-            preview_sec = 0
-            duration = 0
-            preview_time = "00:00"
-        # Only update image if hovered second changes
-        if self._last_preview_sec != preview_sec:
-            self._last_preview_sec = preview_sec
-            # Only show styled percent and time, no image
-            self.previewLabel.setPixmap(QPixmap())
-            styled_text = f'<div style="padding:8px 18px 4px 18px; border-radius:12px; background:rgba(0,0,0,0.75);">'
-            styled_text += f'<span style="font-size:22px; color:#e50914; font-weight:bold;">{int(percent*100)}%</span><br>'
-            styled_text += f'<span style="font-size:15px; color:#fff;">{preview_time} / {duration//60:02}:{duration%60:02}</span>'
-            styled_text += '</div>'
-            self.previewLabel.setText(styled_text)
-            self.previewLabel.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        # Position popup above the progress bar handle using global coordinates
-        slider = self.positionSlider
-        groove_rect = slider.rect().adjusted(16, (slider.rect().height() - 18) // 2, -16, -(slider.rect().height() - 18) // 2)
-        handle_x = groove_rect.left() + groove_rect.width() * percent
-        # Get the global position of the handle (above the bar)
-        from PyQt6.QtCore import QPoint
-        handle_point = slider.mapToGlobal(groove_rect.topLeft() + QPoint(int(groove_rect.width() * percent), 0))
-        # Map global position back to previewLabel's parent
-        main_window = self.previewLabel.parent()
-        if main_window is None:
-            print("[WARNING] previewLabel parent is None, using fallback for coordinate mapping.")
-            main_window = self.parent if self.parent else self.widget
-        parent_pos = main_window.mapFromGlobal(handle_point)
-        popup_x = int(parent_pos.x() - self.previewLabel.width()//2)
-        popup_y = int(parent_pos.y() - self.previewLabel.height() - 8)
-        if popup_y < 0:
-            popup_y = 0
-        self.previewLabel.move(max(0, popup_x), popup_y)
-        self.previewLabel.show()
-        self.previewLabel.raise_()
-
-
-    def leaveEvent(self, event):
-        self.previewLabel.hide()
-        super().leaveEvent(event)
+    def update_volume_icon_opacity(self, value):
+        # Minimum opacity at 0 volume, max at 100
+        min_opacity = 0.25
+        max_opacity = 1.0
+        opacity = min_opacity + (max_opacity - min_opacity) * (value / 100)
+        self.volume_icon_opacity.setOpacity(opacity)
 
     def show_movie_info(self):
         # This method will be connected to the info button. It should trigger the overlay in the player window.
@@ -252,6 +206,10 @@ class ControlsBar(QHBoxLayout):
     def open_file(self):
         fileName, _ = QFileDialog.getOpenFileName(self.parent, "Open Video", "", "Video Files (*.mp4 *.avi *.mkv *.mov)")
         if fileName:
+            # Set file name on window controls if available
+            if hasattr(self.parent, 'windowControls'):
+                import os
+                self.parent.windowControls.set_title(os.path.basename(fileName))
             self.mediaPlayer.setSource(QUrl.fromLocalFile(fileName))
             self.mediaPlayer.play()
 
@@ -305,10 +263,26 @@ class ControlsBar(QHBoxLayout):
 
 
     def update_blink_label(self, count):
-        self.blinkLabel.setText(f"Blinks: {count}")
-        # Neon blink effect
-        self.blink_anim.stop()
-        self.blink_anim.start()
+        self.blinkLabel.setText(f"BLINKS: {count}")
+        # Animate blink icon: flash to bright color then return
+        base_style = '''
+            QLabel {
+                background: rgba(20, 20, 30, 0.62);
+                border-radius: 11px;
+                border: 2.5px solid #4f8cff;
+            }
+        '''
+        flash_style = '''
+            QLabel {
+                background: qradialgradient(cx:0.5, cy:0.5, radius:0.8, fx:0.5, fy:0.5, stop:0 #b8e0ff, stop:1 #4f8cff);
+                border-radius: 11px;
+                border: 2.5px solid #4f8cff;
+            }
+        '''
+        if hasattr(self, 'blinkCircle') and self.blinkCircle:
+            self.blinkCircle.setStyleSheet(flash_style)
+            from PyQt6.QtCore import QTimer
+            QTimer.singleShot(180, lambda: self.blinkCircle.setStyleSheet(base_style))
 
     def update_time_label(self):
         pos_ms = self.mediaPlayer.position()
@@ -371,7 +345,7 @@ class ControlsBar(QHBoxLayout):
             self._aiSidebar.hide()
         if self._aiSidebar.isVisible():
             self._aiSidebar.hide()
-            self.videoWidget.setFullScreen(True)
+            mw.showFullScreen()
             self.set_controls_visible(True, instant=True)
             self.fullscreen = True
             self.widget.setProperty("fullscreen", True)

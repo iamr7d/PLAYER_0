@@ -91,9 +91,30 @@ class BlinkCounterThread(QThread):
                                 elapsed = now - start_time
                                 elapsed_hms = str(timedelta(seconds=int(elapsed.total_seconds())))
                                 real_time_12h = now.strftime('%I:%M:%S %p')
-                                with open(log_path, 'a', newline='') as f:
+                                # Read all rows, replace any with matching elapsed_hms, else append
+                                import csv
+                                import os
+                                rows = []
+                                replaced = False
+                                if os.path.exists(log_path):
+                                    with open(log_path, 'r', newline='') as f:
+                                        reader = list(csv.reader(f))
+                                        header = reader[0] if reader else []
+                                        rows = reader[1:] if len(reader) > 1 else []
+                                # Replace any row with the same elapsed_hms
+                                for i, row in enumerate(rows):
+                                    if len(row) > 1 and row[1] == elapsed_hms:
+                                        rows[i] = [real_time_12h, elapsed_hms, blink_count]
+                                        replaced = True
+                                        break
+                                if not replaced:
+                                    rows.append([real_time_12h, elapsed_hms, blink_count])
+                                # Write header and all rows
+                                with open(log_path, 'w', newline='') as f:
                                     writer = csv.writer(f)
-                                    writer.writerow([real_time_12h, elapsed_hms, blink_count])
+                                    if header:
+                                        writer.writerow(header)
+                                    writer.writerows(rows)
                             closed_frames = 0
                 time.sleep(0.05)
         cap.release()

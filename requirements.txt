@@ -3,6 +3,7 @@ PyQt6-Qt6>=6.2
 PyQt6-sip>=13.2
 dotenv
 pyautogui
-matplotlib
+opencv-python
+mediapipe
 numpy
 
