@@ -6,4 +6,7 @@ pyautogui
 opencv-python
 mediapipe
 numpy
-
+python-dotenv
+requests
+watchdog
+firebase-admin

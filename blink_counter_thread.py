@@ -19,16 +19,18 @@ def normalize_lighting(frame):
     yuv[:,:,0] = cv2.equalizeHist(yuv[:,:,0])
     return cv2.cvtColor(yuv, cv2.COLOR_YUV2BGR)
 
+
 class BlinkCounterThread(QThread):
     blink_count_changed = pyqtSignal(int)
     calibration_complete = pyqtSignal(float)
 
-    def __init__(self, log_base_name="blink_log", parent=None):
+    def __init__(self, log_base_name="blink_log", movie_name="", parent=None):
         super().__init__(parent)
         self._running = True
         self.blink_count = 0
         self.blink_threshold = 0.22
         self.log_base_name = log_base_name
+        self.movie_name = movie_name
 
     def run(self):
         import csv
@@ -48,6 +50,13 @@ class BlinkCounterThread(QThread):
             with open(log_path, 'w', newline='') as f:
                 writer = csv.writer(f)
                 writer.writerow(log_header)
+        real_time_log_path = os.path.join(os.getcwd(), 'csv', 'realtime', 'realtime_log.csv')
+        real_time_log_header = ['real_time', 'elapsed_time', 'blink_count', 'movie_name']
+        # Write header if file doesn't exist
+        if not os.path.exists(real_time_log_path):
+            with open(real_time_log_path, 'w', newline='', encoding='utf-8') as f:
+                writer = csv.writer(f)
+                writer.writerow(real_time_log_header)
         with mp.solutions.face_mesh.FaceMesh(
             max_num_faces=1,
             refine_landmarks=True,
@@ -115,6 +124,26 @@ class BlinkCounterThread(QThread):
                                     if header:
                                         writer.writerow(header)
                                     writer.writerows(rows)
+                                # Upload to Firebase in real time
+                                from firebase_upload import upload_viewer_log
+                                import re
+                                def clean_movie_name(name):
+                                    name = re.sub(r'\.[^.]+$', '', name)
+                                    name = re.sub(r'[._]+', ' ', name)
+                                    match_year = re.search(r'(19|20)\d{2}', name)
+                                    cut_idx = match_year.end() if match_year else None
+                                    if cut_idx:
+                                        name = name[:cut_idx]
+                                    # Remove trailing | and spaces
+                                    name = re.sub(r'[|]+$', '', name)
+                                    name = re.sub(r'[^\w\s]+$', '', name)
+                                    name = re.sub(r'\s+', ' ', name).strip()
+                                    return name.title()
+                                import os
+                                filename_only = os.path.basename(self.movie_name) if self.movie_name else ""
+                                movie_name = clean_movie_name(filename_only) if filename_only else 'Unknown'
+                                upload_viewer_log(blink_count, elapsed_hms, now.strftime('%Y-%m-%d %H:%M:%S'), movie_name)
+
                             closed_frames = 0
                 time.sleep(0.05)
         cap.release()

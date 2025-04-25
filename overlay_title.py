@@ -88,9 +88,14 @@ class OverlayTitleLabel(QLabel):
         if match_tag:
             cut_idx = min(cut_idx, match_tag.start()) if cut_idx else match_tag.start()
         if cut_idx:
-            name = name[:cut_idx]
+            # If the original filename has ")" right after the year, include it
+            orig = re.sub(r'\.[^.]+$', '', file_name)
+            if orig[cut_idx:cut_idx+1] == ')':
+                name = name[:cut_idx] + ')'
+            else:
+                name = name[:cut_idx]
         # Remove trailing non-word characters (punctuation, etc.)
-        name = re.sub(r'[^\w\s]+$', '', name)
+        name = re.sub(r'[^\w\s\)]+$', '', name)
         # Remove extra spaces
         name = re.sub(r'\s+', ' ', name).strip()
         # Safety: If name is too short, fallback to first 2 words from original filename
@@ -110,10 +115,15 @@ class OverlayTitleLabel(QLabel):
         # Set rich text for overlay
         print(f'[DEBUG] Overlay text being set: {title_text}')
         self.setText(f"<span style='font-family: Gotham, Arial, sans-serif; font-size:24px; font-weight:500;'>{title_text}</span>")
+        self.adjustSize()  # Ensure label fits text
         self.setVisible(True)
         self.raise_()  # Ensure overlay is on top
+        # Netflix-style: align overlay left, near top-left of video
+        parent = self.parentWidget()
+        if parent:
+            width = min(self.width(), parent.width() - 40)
+            self.setGeometry(32, 32, width, self.height())
         print(f'[DEBUG] Overlay geometry: {self.geometry()}, parent: {self.parentWidget().geometry() if self.parentWidget() else None}')
-        # For debugging: keep overlay always visible and opaque
         self.setWindowOpacity(1.0)
         # Comment out fade/auto-hide for debug
         #self.anim.stop()
