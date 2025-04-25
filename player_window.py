@@ -25,6 +25,15 @@ class ModernVideoPlayer(QMainWindow):
         else:
             if hasattr(self, 'overlayTitle'):
                 self.overlayTitle.hide_overlay()
+    def handle_error(self, error, error_string=None):
+        from PyQt6.QtWidgets import QMessageBox
+        msg = QMessageBox(self)
+        msg.setIcon(QMessageBox.Icon.Critical)
+        msg.setWindowTitle("Playback Error")
+        msg.setText(f"Playback error: {error_string if error_string else str(error)}")
+        msg.setStandardButtons(QMessageBox.StandardButton.Ok)
+        msg.exec()
+
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -55,6 +64,14 @@ class ModernVideoPlayer(QMainWindow):
         self.info_overlay = None
         self.init_ui()
 
+    def closeEvent(self, event):
+        # Clean up media player resources
+        try:
+            self.mediaPlayer.stop()
+        except Exception:
+            pass
+        event.accept()
+
     def init_ui(self):
         self.widget = QWidget(self)
         self.setCentralWidget(self.widget)
@@ -79,6 +96,7 @@ class ModernVideoPlayer(QMainWindow):
             pass
         # Connect to playback state change for overlay
         self.mediaPlayer.playbackStateChanged.connect(self._on_playback_state_changed)
+        self.mediaPlayer.errorOccurred.connect(self.handle_error)
 
         self.overlayTitle = OverlayTitleLabel(self.videoWidget)
         self.overlayTitle.raise_()
