@@ -24,13 +24,14 @@ class BlinkCounterThread(QThread):
     blink_count_changed = pyqtSignal(int)
     calibration_complete = pyqtSignal(float)
 
-    def __init__(self, log_base_name="blink_log", movie_name="", parent=None):
+    def __init__(self, log_base_name="blink_log", movie_name="", user_name=None, parent=None):
         super().__init__(parent)
         self._running = True
         self.blink_count = 0
         self.blink_threshold = 0.22
         self.log_base_name = log_base_name
         self.movie_name = movie_name
+        self.user_name = user_name
 
     def run(self):
         import csv
@@ -42,7 +43,9 @@ class BlinkCounterThread(QThread):
         consecutive_frames = 2
         ear_history = []
         max_history = 5
-        log_path = os.path.join(os.getcwd(), f'{self.log_base_name}.csv')
+        csv_dir = os.path.join(os.getcwd(), 'csv')
+        os.makedirs(csv_dir, exist_ok=True)
+        log_path = os.path.join(csv_dir, f'{self.log_base_name}.csv')
         log_header = ['real_time_12h', 'elapsed_hms', 'blink_count']
         start_time = datetime.now()
         # Write header if file doesn't exist
@@ -142,7 +145,7 @@ class BlinkCounterThread(QThread):
                                 import os
                                 filename_only = os.path.basename(self.movie_name) if self.movie_name else ""
                                 movie_name = clean_movie_name(filename_only) if filename_only else 'Unknown'
-                                upload_viewer_log(blink_count, elapsed_hms, now.strftime('%Y-%m-%d %H:%M:%S'), movie_name)
+                                upload_viewer_log(blink_count, elapsed_hms, now.strftime('%Y-%m-%d %H:%M:%S'), movie_name, self.user_name)
 
                             closed_frames = 0
                 time.sleep(0.05)

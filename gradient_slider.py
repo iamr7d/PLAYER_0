@@ -1,6 +1,6 @@
 from PyQt6.QtWidgets import QSlider
 from PyQt6.QtCore import Qt, QTimer, pyqtSignal
-from PyQt6.QtGui import QPainter, QBrush, QPen, QLinearGradient, QColor
+from PyQt6.QtGui import QPainter, QBrush, QPen, QLinearGradient, QColor, QPainterPath
 import math
 
 class GradientSlider(QSlider):
@@ -86,7 +86,7 @@ class GradientSlider(QSlider):
             painter.setClipRect(groove_rect)
             painter.setPen(Qt.PenStyle.NoPen)
             for x in range(int(groove_rect.left()) - 40, int(groove_rect.right()) + 40, stripe_width + stripe_spacing):
-                path = QPainter.Path()
+                path = QPainterPath()
                 path.moveTo(x + offset, groove_rect.top())
                 path.lineTo(x + offset + stripe_width, groove_rect.top())
                 path.lineTo(x + offset + stripe_width - groove_rect.height(), groove_rect.bottom())

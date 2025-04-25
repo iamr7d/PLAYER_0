@@ -63,7 +63,7 @@ class OverlayTitleLabel(QLabel):
         # Timer to auto-hide overlay after a duration
         self.hide_timer = QTimer(self)
         self.hide_timer.setSingleShot(True)  # Only fires once per show
-        self.hide_timer.timeout.connect(self.hide_with_fade)  # Connect to fade-out
+        self.hide_timer.timeout.connect(self.hide_overlay)  # Connect to fade-out
 
     def show_title(self, file_name, duration=2300):
         """
@@ -133,15 +133,24 @@ class OverlayTitleLabel(QLabel):
         #self.hide_timer.start(duration)
 
 
-    def hide_with_fade(self):
+    def hide_overlay(self):
         """
         Fade out the overlay label and hide it after the animation completes.
         """
         self.anim.stop()
-        self.anim.setStartValue(1.0)  # Start fade from visible
-        self.anim.setEndValue(0.0)    # End fade at invisible
+        self.anim.setStartValue(1.0)
+        self.anim.setEndValue(0.0)
         self.anim.start()
-        self.anim.finished.connect(self.hide)  # Hide widget after fade
+        self.anim.finished.connect(self.hide)
+
+    def keep_overlay(self):
+        """
+        Show overlay and cancel auto-hide timer (used when paused or hovered).
+        """
+        self.show()
+        self.anim.stop()
+        self.setWindowOpacity(1.0)
+        self.hide_timer.stop()
 
     def resizeEvent(self, event):
         """

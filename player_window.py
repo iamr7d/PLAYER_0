@@ -11,9 +11,20 @@ import os
 
 
 
-
-
 class ModernVideoPlayer(QMainWindow):
+    def _on_playback_state_changed(self, state):
+        # Show overlay when video starts playing (not fullscreen)
+        if state == self.mediaPlayer.PlaybackState.PlayingState:
+            if not self.isFullScreen() and hasattr(self, 'overlayTitle'):
+                if hasattr(self, 'file_name') and self.file_name:
+                    self.overlayTitle.show_title(self.file_name)
+                    self.overlayTitle.raise_()
+                    self.overlayTitle.hide_timer.stop()
+                    self.overlayTitle.hide_timer.start(3000)
+        # Hide overlay in fullscreen or when paused
+        else:
+            if hasattr(self, 'overlayTitle'):
+                self.overlayTitle.hide_overlay()
     def mousePressEvent(self, event):
         if event.button() == Qt.MouseButton.LeftButton:
             self._drag_pos = event.globalPosition().toPoint() - self.frameGeometry().topLeft()
@@ -39,7 +50,8 @@ class ModernVideoPlayer(QMainWindow):
         self.setStyleSheet(MODERN_STYLESHEET)
         self.setMouseTracking(True)
         self.setWindowFlags(self.windowFlags() | Qt.WindowType.FramelessWindowHint)
-        self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground)
+        # Only set translucent background in fullscreen to avoid video not showing in windowed mode
+        self.translucent_bg_set = False
         self.info_overlay = None
         self.init_ui()
 
@@ -56,6 +68,17 @@ class ModernVideoPlayer(QMainWindow):
         self.mediaPlayer.setAudioOutput(self.audio_output)
         self.videoWidget = RoundedVideoWidget(radius=28, parent=self)
         self.mediaPlayer.setVideoOutput(self.videoWidget)
+        # Set correct aspect ratio mode for video
+        try:
+            self.videoWidget.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        except Exception:
+            pass
+        try:
+            self.mediaPlayer.setAspectRatioMode(Qt.AspectRatioMode.KeepAspectRatio)
+        except Exception:
+            pass
+        # Connect to playback state change for overlay
+        self.mediaPlayer.playbackStateChanged.connect(self._on_playback_state_changed)
 
         self.overlayTitle = OverlayTitleLabel(self.videoWidget)
         self.overlayTitle.raise_()
@@ -116,6 +139,12 @@ class ModernVideoPlayer(QMainWindow):
             # Restore margins in windowed mode
             self.mainLayout.setContentsMargins(*self.default_margins)
             self.videoWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            if self.translucent_bg_set:
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, False)
+                self.translucent_bg_set = False
+            # Show overlay in windowed mode
+            if hasattr(self, 'overlayTitle'):
+                self.overlayTitle.raise_()
         else:
             self.showFullScreen()
             self.controls.widget.show()
@@ -124,6 +153,12 @@ class ModernVideoPlayer(QMainWindow):
             # Remove margins in fullscreen
             self.mainLayout.setContentsMargins(0, 0, 0, 0)
             self.videoWidget.setSizePolicy(QSizePolicy.Policy.Expanding, QSizePolicy.Policy.Expanding)
+            if not self.translucent_bg_set:
+                self.setAttribute(Qt.WidgetAttribute.WA_TranslucentBackground, True)
+                self.translucent_bg_set = True
+            # Hide overlay in fullscreen
+            if hasattr(self, 'overlayTitle'):
+                self.overlayTitle.hide_overlay()
         # Always force windowControls invisible in fullscreen
         self.windowControls.setVisible(not self.isFullScreen())
 
@@ -226,36 +261,52 @@ class ModernVideoPlayer(QMainWindow):
         for url in event.mimeData().urls():
             if url.isLocalFile():
                 fileName = url.toLocalFile()
-                self.windowControls.set_title(os.path.basename(fileName))
+                self.file_name = os.path.basename(fileName)
+                self.windowControls.set_title(self.file_name)
                 self.mediaPlayer.setSource(QUrl.fromLocalFile(fileName))
                 self.mediaPlayer.play()
+                # Ensure the video widget is visible and updated
+                self.videoWidget.show()
+                self.videoWidget.update()
                 # Show overlay title on drop
                 if hasattr(self, 'overlayTitle'):
-                    self.overlayTitle.show_title(os.path.basename(fileName))
+                    self.overlayTitle.show_title(self.file_name)
                 break
 
     def open_file(self):
         fileName, _ = QFileDialog.getOpenFileName(self, "Open Video", "", "Video Files (*.mp4 *.avi *.mkv *.mov)")
         if fileName:
-            self.windowControls.set_title(os.path.basename(fileName))
+            self.file_name = os.path.basename(fileName)
+            self.windowControls.set_title(self.file_name)
             self.mediaPlayer.setSource(QUrl.fromLocalFile(fileName))
             self.mediaPlayer.play()
+            # Ensure the video widget is visible and updated
+            self.videoWidget.show()
+            self.videoWidget.update()
             # Show overlay title on open
             if hasattr(self, 'overlayTitle'):
-                self.overlayTitle.show_title(os.path.basename(fileName))
+                self.overlayTitle.show_title(self.file_name)
 
     def mouseMoveEvent(self, event):
         # Show controls and restart auto-hide timer in fullscreen
         if self.isFullScreen():
             self.show_controls()
             self.windowControls.set_buttons_visible(True)
+            self.windowControls.setVisible(True)  # Always show top controls bar on mouse move
             self.setCursor(Qt.CursorShape.ArrowCursor)
-        # Show overlay title on mouse move
+        # Show overlay title on mouse move (Netflix style: fade in, auto-hide after 3s)
         if hasattr(self, 'overlayTitle') and hasattr(self, 'mediaPlayer'):
             src = self.mediaPlayer.source() if hasattr(self.mediaPlayer, 'source') else None
             if src and hasattr(src, 'toLocalFile'):
                 file_name = os.path.basename(src.toLocalFile())
-                self.overlayTitle.show_title(file_name)
+                if not self.isFullScreen():
+                    self.overlayTitle.show_title(file_name)
+                    self.overlayTitle.raise_()
+                    self.overlayTitle.hide_timer.stop()
+                    if self.mediaPlayer.playbackState() == self.mediaPlayer.PlaybackState.PlayingState:
+                        self.overlayTitle.hide_timer.start(3000)
+                    else:
+                        self.overlayTitle.keep_overlay()
         super().mouseMoveEvent(event)
 
     def mousePressEvent(self, event):
@@ -277,12 +328,17 @@ class ModernVideoPlayer(QMainWindow):
                 self.mediaPlayer.pause()
             else:
                 self.mediaPlayer.play()
-            # Show overlay title on play/pause
+            # Show overlay title on play/pause (Netflix style)
             if hasattr(self, 'overlayTitle') and hasattr(self, 'mediaPlayer'):
                 src = self.mediaPlayer.source() if hasattr(self.mediaPlayer, 'source') else None
                 if src and hasattr(src, 'toLocalFile'):
                     file_name = os.path.basename(src.toLocalFile())
                     self.overlayTitle.show_title(file_name)
+                    self.overlayTitle.hide_timer.stop()
+                    if self.mediaPlayer.playbackState() == self.mediaPlayer.PlaybackState.PlayingState:
+                        self.overlayTitle.hide_timer.start(3000)
+                    else:
+                        self.overlayTitle.keep_overlay()
         elif key == Qt.Key.Key_Right:
             # Right arrow seeks forward 5 seconds
             self.mediaPlayer.setPosition(self.mediaPlayer.position() + 5000)

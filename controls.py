@@ -7,6 +7,7 @@ from gradient_slider import GradientSlider
 from blink_counter_thread import BlinkCounterThread
 import base64
 import os
+from user_config import get_or_create_username
 
 from PyQt6.QtCore import pyqtSignal
 
@@ -249,7 +250,8 @@ class ControlsBar(QHBoxLayout):
         movie_base = os.path.splitext(os.path.basename(movie_path))[0] if movie_path else "blink_log"
         if state == self.mediaPlayer.PlaybackState.PlayingState:
             if not self.blink_thread or not self.blink_thread.isRunning():
-                self.blink_thread = BlinkCounterThread(log_base_name=movie_base, movie_name=movie_path if movie_path else "")
+                user_name = get_or_create_username()
+                self.blink_thread = BlinkCounterThread(log_base_name=movie_base, movie_name=movie_path if movie_path else "", user_name=user_name)
                 self.blink_thread.blink_count = self._last_blink_count
                 self.blink_thread.blink_count_changed.connect(self._update_and_store_blink_label)
                 self.blink_thread.start()
